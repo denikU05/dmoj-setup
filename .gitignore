@@ -1,0 +1,4 @@
+config.env
+dmoj/
+*.log
+.DS_Store
