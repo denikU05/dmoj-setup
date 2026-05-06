@@ -89,7 +89,7 @@ else
 fi
 
 # --- Clone repositories ---
-echo "[1/7] Cloning repositories..."
+echo "[1/8] Cloning repositories..."
 mkdir -p "$DMOJ_DIR"
 cd "$DMOJ_DIR"
 
@@ -102,19 +102,28 @@ git clone --recursive https://github.com/DMOJ/judge-server.git judge-server
 
 cd "$DMOJ_DIR/dmoj-docker/dmoj"
 
-echo "[2/7] Initializing configs..."
+echo "[2/8] Initializing configs..."
 ./scripts/initialize
 
 # --- Removing mathoid ---
-echo "[2.5/7] Removing mathoid..."
+echo "[3/7] Removing mathoid and optimizing settings..."
 sed -i '/^  mathoid:/,/^  [a-z]/ { /^  [a-z]/!d; /^  mathoid:/d }' docker-compose.yml
 sed -i '/- mathoid/d' docker-compose.yml
 
 # --- Removing 'version' from docker-compose ---
 sed -i '/^version:/d' docker-compose.yml
 
+# --- Applying local_settings.py modifications ---
+cat <<EOF >> repo/dmoj/local_settings.py
+
+# --- Added by install.sh ---
+MATHOID_URL = False
+BAD_MAIL_PROVIDERS = []
+DEFAULT_USER_MATH_ENGINE = 'jax'
+EOF
+
 # --- Configure environment ---
-echo "[3/7] Setting up environment variables..."
+echo "[4/8] Setting up environment variables..."
 
 cat > environment/mysql.env <<EOF
 MYSQL_DATABASE=dmoj
@@ -137,17 +146,17 @@ EOF
 sed -i "s/server_name .*/server_name $HOST;/" nginx/conf.d/nginx.conf
 
 # --- Build images ---
-echo "[4/7] Building Docker images (this may take a few minutes)..."
+echo "[5/8] Building Docker images (this may take a few minutes)..."
 docker compose build --parallel
 
 # --- First run ---
-echo "[5/7] Starting database and site..."
+echo "[6/8] Starting database and site..."
 docker compose up -d site
 echo "Waiting for database to start..."
 sleep 15
 
 # --- Migrations and fixtures ---
-echo "[6/7] Running migrations and loading fixtures..."
+echo "[7/8] Running migrations and loading fixtures..."
 ./scripts/migrate
 ./scripts/copy_static
 ./scripts/manage.py loaddata navbar
@@ -181,7 +190,7 @@ Judge.objects.update_or_create(
 EOF
 
 # --- Judge ---
-echo "[7/7] Setting up judge-server (tier${JUDGE_TIER})..."
+echo "[8/8] Setting up judge-server (tier${JUDGE_TIER})..."
 
 # Create judge.yml
 cat > problems/judge.yml <<EOF
@@ -202,7 +211,8 @@ docker compose up -d
 # Wait for bridged to start and get its IP
 echo "Waiting for bridged to start..."
 sleep 10
-BRIDGED_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' $(docker ps -qf "name=bridged") | grep -v '^$' | head -1)
+BRIDGED_IP=$(docker inspect $(docker ps -qf "name=bridged") \
+  --format '{{range $name, $net := .NetworkSettings.Networks}}{{if eq $name "dmoj_db"}}{{$net.IPAddress}}{{end}}{{end}}')
 
 # Start judge container with concurrency limits
 docker run \
